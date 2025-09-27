@@ -24,7 +24,7 @@ from torch_geometric.transforms import ToUndirected
 from typing import List
 
 class CoraDataset(Dataset):
-    def __init__(self, cfg, dataset_type="custom"):
+    def __init__(self, cfg):
         self.cfg = cfg 
         self.data_file = self.cfg.dataset.name
         self.per_node_samples_rw = self.cfg.dataset.per_node_samples_rw
@@ -41,178 +41,135 @@ class CoraDataset(Dataset):
         with open('/mnt/data/mohammad-hosseini/DiGress/SaGess/directed_cora_attributes.pt', 'rb') as f:
             self.edge_gcn_attributes = pickle.load(f)
         
-        if dataset_type == "custom":
-            base_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), os.pardir, os.pardir, 'data')
-            directed_graph = False
+        base_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), os.pardir, os.pardir, 'data')
+        directed_graph = False
 
-            if self.data_file == 'Wiki':
-                graphs = AttributedGraphDataset(base_path, self.data_file)
-            if self.data_file == 'ego-facebook':
-                graphs = SNAPDataset(base_path, self.data_file).get(1)
-                graphs.data = Data(x=graphs.x, edge_index=graphs.edge_index, 
-                                   n_nodes=graphs.num_nodes)
-            if self.data_file == 'EmailEUCore':
-                graphs = EmailEUCore(base_path)
-            if self.data_file == 'Cora':
-                graphs = Planetoid(base_path, self.data_file, transform=T.NormalizeFeatures())
-                # graphs.data = load_directed_cora()
-                # graphs = DirectedCoraDataset('/mnt/data/mohammad-hosseini/DiGress/SaGess/data/DirectedCora')
-                directed_graph = True 
-            if self.data_file == 'sbm':
-                class SBMGraph:
-                    def __init__(self):
-                        self.data = None 
-                        with open(base_path + '/sbm_graph.pkl', 'rb') as f:
-                            self.data = pickle.load(f)
-                graphs = SBMGraph()
-            if self.data_file == 'deezer':
-                class Deezer:
-                    def __init__(self):
-                        self.data = None 
-                        with open(base_path + '/deezer_edge_lists.pkl', 'rb') as f:
-                            graph_list = pickle.load(f)
-                        self.data = []
-                        for edge_list in graph_list:
-                            undirected_edge_list = edge_list + [(j, i) for i, j in edge_list]
-                            edge_index = torch.tensor(undirected_edge_list, dtype=torch.long).t().contiguous()
-                            n = edge_index.max().item() + 1
-                            
-                            X = torch.ones(n, 1, dtype=torch.float)
-                            y = torch.zeros([1, 0]).float()
-                            edge_attr = torch.zeros(edge_index.shape[-1], 2, dtype=torch.float)
-                            edge_attr[:, 1] = 1
-                            num_nodes = n * torch.ones(1, dtype=torch.long)
-                            
-                            self.data.append(Data(x=X, 
-                                                edge_index=edge_index, 
-                                                edge_attr=edge_attr,
-                                                y=y, n_nodes=num_nodes))
-                        
-                        self.data = self.data[-1]
-                
-                graphs = Deezer()
+        graphs = Planetoid(base_path, self.data_file, transform=T.NormalizeFeatures())
+        # graphs.data = load_directed_cora()
+        # graphs = DirectedCoraDataset('/mnt/data/mohammad-hosseini/DiGress/SaGess/data/DirectedCora')
+        directed_graph = True 
 
-            self.graphs = graphs
-            # print(graphs.data.has_isolated_nodes())
-            
-            if directed_graph == True:
-                edge_list = graphs.data.edge_index
-                edge_list_nx = [(int(i[0]), int(i[1])) for i in edge_list.transpose(0, 1)]
-                self.nx_graph = nx.from_edgelist(edge_list_nx, create_using=nx.DiGraph)
-            else:
-                edge_list = to_undirected(graphs.data.edge_index)
-                edge_list_nx = [(int(i[0]), int(i[1])) for i in edge_list.transpose(0, 1)]
-                self.nx_graph = nx.from_edgelist(edge_list_nx)
+        self.graphs = graphs
+        # print(graphs.data.has_isolated_nodes())
+        
+        if directed_graph == True:
+            edge_list = graphs.data.edge_index
+            edge_list_nx = [(int(i[0]), int(i[1])) for i in edge_list.transpose(0, 1)]
+            self.nx_graph = nx.from_edgelist(edge_list_nx, create_using=nx.DiGraph)
+        else:
+            edge_list = to_undirected(graphs.data.edge_index)
+            edge_list_nx = [(int(i[0]), int(i[1])) for i in edge_list.transpose(0, 1)]
+            self.nx_graph = nx.from_edgelist(edge_list_nx)
 
 
-            # if self.mask_number and self.mask_number > 0:
-            #     print(f"Masking {self.mask_number} nodes")
-            #     self.mask_nodes(self.mask_number)
-            #     print('edges in graph : ', len(list(self.nx_graph.edges())))
-            
-            #nx_graph = nx.k_core(nx_graph, k= 27)
-            print('edges in graph : ', len(list(self.nx_graph.edges())))
+        # if self.mask_number and self.mask_number > 0:
+        #     print(f"Masking {self.mask_number} nodes")
+        #     self.mask_nodes(self.mask_number)
+        #     print('edges in graph : ', len(list(self.nx_graph.edges())))
+        
+        #nx_graph = nx.k_core(nx_graph, k= 27)
+        print('edges in graph : ', len(list(self.nx_graph.edges())))
 
-            y = torch.zeros([1, 0]).float()
-            n_nodes = len(list(self.nx_graph.nodes()))
-            print('nodes in graph : ', n_nodes)
+        y = torch.zeros([1, 0]).float()
+        n_nodes = len(list(self.nx_graph.nodes()))
+        print('nodes in graph : ', n_nodes)
 
-            self.samples_sizes = []
-            self.dataset_node_lists = []
+        self.samples_sizes = []
+        self.dataset_node_lists = []
 
-            sampling_start_time = time.time()
+        sampling_start_time = time.time()
 
-            if self.cfg.dataset.sampling_method == 'mix':
-                print('Sampling type: mix')
+        if self.cfg.dataset.sampling_method == 'mix':
+            print('Sampling type: mix')
 
-                self.random_walk_sample(per_node_samples=30, 
-                                        subgraph_size=self.subgraph_size)
-                self.uniform_sample(per_node_samples=7000, 
+            self.random_walk_sample(per_node_samples=30, 
                                     subgraph_size=self.subgraph_size)
-                # self.ego_sample(per_node_samples=7, 
-                                #   subgraph_size=self.subgraph_size)
-                self.ego_sample_threaded(per_node_samples=7, 
-                                         subgraph_size=self.subgraph_size, 
-                                         radius=self.ego_sample_radius,
-                                         max_workers=self.cfg.dataset.sampling_threads)
+            self.uniform_sample(per_node_samples=7000, 
+                                subgraph_size=self.subgraph_size)
+            # self.ego_sample(per_node_samples=7, 
+                            #   subgraph_size=self.subgraph_size)
+            self.ego_sample_threaded(per_node_samples=7, 
+                                        subgraph_size=self.subgraph_size, 
+                                        radius=self.ego_sample_radius,
+                                        max_workers=self.cfg.dataset.sampling_threads)
 
-            elif self.cfg.dataset.sampling_method == 'random_walk':
-                print('Sampling type: random walk')
+        elif self.cfg.dataset.sampling_method == 'random_walk':
+            print('Sampling type: random walk')
 
-                self.random_walk_sample(self.per_node_samples_rw, self.subgraph_size)
-                
-                # self.random_walk_sample_threaded(self.per_node_samples_rw, self.subgraph_size, 
-                #                                  max_workers=self.cfg.dataset.sampling_threads)
-
-            elif self.cfg.dataset.sampling_method == 'ego':
-                print('Sampling type: ego')
-
-                # self.ego_sample(self.per_node_samples_ego, self.subgraph_size, 
-                                                            # radius=self.ego_sample_radius)
-
-                self.ego_sample_threaded(self.per_node_samples_ego, self.subgraph_size, 
-                                         radius=self.ego_sample_radius, 
-                                         max_workers=self.cfg.dataset.sampling_threads)
-
-            elif self.cfg.dataset.sampling_method == 'uniform':
-                print('Sampling type: uniform')
-
-                self.uniform_sample(self.per_node_samples_unif, self.subgraph_size)
+            self.random_walk_sample(self.per_node_samples_rw, self.subgraph_size)
             
-            sampling_end_time = time.time()
-            n_samples = len(self.dataset_node_lists)
-            print(f'We need to sample {n_samples} subgraphs')
-            print(f'We sampled {len(self.dataset_node_lists)} subgraphs')
-            self.sample_size = len(self.dataset_node_lists)
-            sampling_time = sampling_end_time - sampling_start_time
-            minutes = sampling_time // 60
-            seconds = sampling_time % 60
-            print('sampling start time : ', sampling_start_time)
-            print('sampling end time : ', sampling_end_time)
-            print(f"Total sampling time: {int(minutes)} mins, {seconds:.2f} secs")
-            
-            # sampled graphs effectively for training: 90%
-            dataset_samples_initialids = [(self.dataset_node_lists[i],
-                                           subgraph(torch.tensor(self.dataset_node_lists[i]), edge_list)[0])
-                                          for i in range(n_samples)]
+            # self.random_walk_sample_threaded(self.per_node_samples_rw, self.subgraph_size, 
+            #                                  max_workers=self.cfg.dataset.sampling_threads)
 
-            dict_maps = [{dataset_samples_initialids[j][0][i]: i for i in range(self.samples_sizes[j])} for j in range(n_samples)]
-            dataset_samples_wnmaps = [(torch.tensor([[x] for x in dataset_samples_initialids[i][0]]),
-                                       dataset_samples_initialids[i][1].apply_(lambda x: dict_maps[i][x])) for i in
-                                      range(n_samples)]
+        elif self.cfg.dataset.sampling_method == 'ego':
+            print('Sampling type: ego')
 
-            Train_data = []
-            self.dataset_samples_wnmaps = dataset_samples_wnmaps
-            undirected_transformer = ToUndirected()
-            skiped = 0
-            for i in tqdm(range(n_samples), desc='Creating attributes'):
-                # edge_attr = torch.tensor(
-                #     [[0 for k in range(dataset_samples_wnmaps[i][1].size()[1])],
-                #      [1 for n in range(dataset_samples_wnmaps[i][1].size()[1])]], 
-                #     dtype = torch.long).transpose(0,1)
+            # self.ego_sample(self.per_node_samples_ego, self.subgraph_size, 
+                                                        # radius=self.ego_sample_radius)
+
+            self.ego_sample_threaded(self.per_node_samples_ego, self.subgraph_size, 
+                                        radius=self.ego_sample_radius, 
+                                        max_workers=self.cfg.dataset.sampling_threads)
+
+        elif self.cfg.dataset.sampling_method == 'uniform':
+            print('Sampling type: uniform')
+
+            self.uniform_sample(self.per_node_samples_unif, self.subgraph_size)
+        
+        sampling_end_time = time.time()
+        n_samples = len(self.dataset_node_lists)
+        print(f'We need to sample {n_samples} subgraphs')
+        print(f'We sampled {len(self.dataset_node_lists)} subgraphs')
+        self.sample_size = len(self.dataset_node_lists)
+        sampling_time = sampling_end_time - sampling_start_time
+        minutes = sampling_time // 60
+        seconds = sampling_time % 60
+        print('sampling start time : ', sampling_start_time)
+        print('sampling end time : ', sampling_end_time)
+        print(f"Total sampling time: {int(minutes)} mins, {seconds:.2f} secs")
+        
+        # sampled graphs effectively for training: 90%
+        dataset_samples_initialids = [(self.dataset_node_lists[i],
+                                        subgraph(torch.tensor(self.dataset_node_lists[i]), edge_list)[0])
+                                        for i in range(n_samples)]
+
+        dict_maps = [{dataset_samples_initialids[j][0][i]: i for i in range(self.samples_sizes[j])} for j in range(n_samples)]
+        dataset_samples_wnmaps = [(torch.tensor([[x] for x in dataset_samples_initialids[i][0]]),
+                                    dataset_samples_initialids[i][1].apply_(lambda x: dict_maps[i][x])) for i in
+                                    range(n_samples)]
+
+        Train_data = []
+        self.dataset_samples_wnmaps = dataset_samples_wnmaps
+        undirected_transformer = ToUndirected()
+        skiped = 0
+        for i in tqdm(range(n_samples), desc='Creating attributes'):
+            # edge_attr = torch.tensor(
+            #     [[0 for k in range(dataset_samples_wnmaps[i][1].size()[1])],
+            #      [1 for n in range(dataset_samples_wnmaps[i][1].size()[1])]], 
+            #     dtype = torch.long).transpose(0,1)
+        
+            edge_attr = self.get_edge_attributes(dataset_samples_wnmaps[i][0], 
+                                                    dataset_samples_wnmaps[i][1])
+            if self.original_node_attribute:
+                x = self.graphs[0].x[dataset_samples_wnmaps[i][0].flatten()]
+            else:
+                x = F.one_hot(torch.flatten(dataset_samples_wnmaps[i][0]), 
+                                num_classes = n_nodes).float().to_sparse()
+            local_data = Data(x=x,
+                            edge_index=dataset_samples_wnmaps[i][1],
+                            edge_attr = edge_attr,
+                            n_nodes=self.subgraph_size*torch.ones(1, dtype=torch.long), y = y)
+            Train_data.append(local_data)
+        
+        self.original_data = copy.deepcopy(Train_data)
+        with open('edge_attributes_dict.pkl', 'wb') as f:
+            pickle.dump(self.edge_att_dict, f)
+        # Remove samples connected to randomly selected nodes if requested
+        if self.cfg.dataset.get('remove_inference_nodes', False):
+            num_nodes_to_remove = self.cfg.dataset.get('num_inference_nodes', 100)
+            self.remove_nodes_for_inference(Train_data, num_nodes_to_remove)
             
-                edge_attr = self.get_edge_attributes(dataset_samples_wnmaps[i][0], 
-                                                     dataset_samples_wnmaps[i][1])
-                if self.original_node_attribute:
-                    x = self.graphs[0].x[dataset_samples_wnmaps[i][0].flatten()]
-                else:
-                    x = F.one_hot(torch.flatten(dataset_samples_wnmaps[i][0]), 
-                                  num_classes = n_nodes).float().to_sparse()
-                local_data = Data(x=x,
-                                edge_index=dataset_samples_wnmaps[i][1],
-                                edge_attr = edge_attr,
-                                n_nodes=self.subgraph_size*torch.ones(1, dtype=torch.long), y = y)
-                Train_data.append(local_data)
-            
-            self.original_data = copy.deepcopy(Train_data)
-            with open('edge_attributes_dict.pkl', 'wb') as f:
-                pickle.dump(self.edge_att_dict, f)
-            # Remove samples connected to randomly selected nodes if requested
-            if self.cfg.dataset.get('remove_inference_nodes', False):
-                num_nodes_to_remove = self.cfg.dataset.get('num_inference_nodes', 100)
-                self.remove_nodes_for_inference(Train_data, num_nodes_to_remove)
-                
-            self.data = Train_data
+        self.data = Train_data
 
     # def get_edge_attributes(self, x, edge_index):
     #     edge_att = []
