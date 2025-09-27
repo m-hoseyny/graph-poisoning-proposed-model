@@ -1,0 +1,10 @@
+defaults:
+    - gnn_model : gcn
+    - edge_classifier_model : edge_mlp
+    - train : train_default
+    - dataset : cora
+    - general : general_default
+
+
+
+
