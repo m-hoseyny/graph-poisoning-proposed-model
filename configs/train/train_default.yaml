@@ -1,5 +1,5 @@
 # Training settings
-n_epochs: 1000
+n_epochs: 2000
 # batch_size: 32  moved to dataset configs 
 lr: 0.001
 clip_grad: null          # float, null to disable
