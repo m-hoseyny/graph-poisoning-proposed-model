@@ -1,18 +1,63 @@
 import os
 from copy import deepcopy
 from typing import Optional, Union, Dict
+from omegaconf import DictConfig
 import torch_geometric.utils
 from omegaconf import OmegaConf, open_dict
 import pytorch_lightning as pl
 from overrides import overrides
 from pytorch_lightning.utilities import rank_zero_only
 from torch_geometric.utils import to_dense_adj, to_dense_batch
+import torch.nn as nn
+import torch.optim as optim
 import random
 import copy 
 import networkx as nx
 import torch
+import wandb
+from datetime import datetime
+import omegaconf
+
 torch.manual_seed(120)
 random.seed(120)
+
+
+def get_optimiser(cfg: DictConfig, gnn_model: nn.Module, edge_mlp: nn.Module) -> optim.Optimizer:
+    if cfg.train.optimizer == "adam":
+        return optim.Adam(list(gnn_model.parameters()) + list(edge_mlp.parameters()), lr=cfg.train.lr)
+    elif cfg.train.optimizer == "sgd":
+        return optim.SGD(list(gnn_model.parameters()) + list(edge_mlp.parameters()), lr=cfg.train.lr)
+    else:
+        raise ValueError(f"Unknown optimizer: {cfg.train.optimizer}")
+    
+def get_cross_entropy_loss(cfg: DictConfig) -> nn.CrossEntropyLoss:
+    return nn.CrossEntropyLoss()
+
+
+def setup_wandb(cfg):
+    # Disable wandb's Sentry error reporting to run on clusters
+    os.environ["WANDB_ERROR_REPORTING"] = "False"
+    sample_size = 0
+    if cfg.dataset.sampling_method == 'ego':
+        sample_size = cfg.dataset.per_node_samples_ego
+    elif cfg.dataset.sampling_method == 'random_walk':
+        sample_size = cfg.dataset.per_node_samples_rw
+    elif cfg.dataset.sampling_method == 'uniform':
+        sample_size = cfg.dataset.per_node_samples_unif
+    elif cfg.dataset.sampling_method == 'mix':
+        sample_size = cfg.dataset.per_node_samples_rw + cfg.dataset.per_node_samples_ego + cfg.dataset.per_node_samples_unif
+    dataset_name = cfg.dataset.name + '_' + cfg.dataset.sampling_method + str(sample_size)
+    
+    model_name = cfg.gnn_model.name + '_' + cfg.edge_classifier_model.name
+    datetim_string = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    config_dict = omegaconf.OmegaConf.to_container(cfg, resolve=True, throw_on_missing=True)
+    kwargs = {'name': f'{dataset_name}_{model_name}', 'project': f'EDGES', 'config': config_dict,
+              'settings': wandb.Settings(_disable_stats=False), 'reinit': True, 
+              'mode': cfg.general.wandb
+              }
+    wandb.init(**kwargs)
+    wandb.save('*.txt')
+    return cfg
 
 def random_walk(G, start_node, length):
     prev_node = start_node
