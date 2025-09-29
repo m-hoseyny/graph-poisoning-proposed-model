@@ -1,4 +1,5 @@
 from omegaconf import DictConfig
+from torch._prims_common import corresponding_complex_dtype
 from model.gcn import get_gcn_model, get_edge_mlp_model
 from model.gat import get_gat_model
 from model.sage import get_sage_model
@@ -14,6 +15,7 @@ import omegaconf
 from datasets.cora_dataset import CoraDataModule
 import tqdm
 from utils import get_optimiser, get_cross_entropy_loss, setup_wandb
+from model.process import process
 
 logger = logging.getLogger(__name__)
 
@@ -66,59 +68,15 @@ def train(cfg: DictConfig) -> None:
         batches = [dataset[i : i + cfg.dataset.batch_size] for i in range(0, len(dataset), cfg.dataset.batch_size)]
 
         for batch in batches:
-            num_nodes_all = [graph.x.shape[0] for graph in batch]
-            node_features_all = [graph.x for graph in batch]
-            node_feature_batch = torch.cat(node_features_all, dim=0).to(device)
+            (gnn_model, 
+             edge_classifier_model, 
+             loss, 
+             correct, 
+             samples) = process(batch, gnn_model, edge_classifier_model, device, optimizer, criterion)
             
-            # Get edge indices (already in COO format: [2, num_edges])
-            edge_index_all = []
-            for graph in batch:
-                edge_index_all.append(graph.edge_index)
-            
-            edge_labels_all = []
-            for graph in batch:
-                edge_labels_all.append(torch.argmax(graph.edge_attr, dim=1))
-            edge_labels_batch = torch.cat(edge_labels_all, dim=0).to(device)
-
-            # Update the edge indices to reflect the new node ordering in the batched tensor
-            # We do this by adding the cumulative sum of the number of nodes from previous graphs
-            edge_index_batch = []
-            num_nodes_offset = 0
-            for i, edge_index in enumerate(edge_index_all):
-                edge_index_offset = edge_index + num_nodes_offset
-                edge_index_batch.append(edge_index_offset)
-                num_nodes_offset += num_nodes_all[i]
-
-            # Concatenate all edge indices along the edge dimension (dim=1)
-            edge_index_batch = torch.cat(edge_index_batch, dim=1).to(device)
-
-            # Forward pass through GCN to get node embeddings
-            node_embeddings_out = gnn_model(node_feature_batch, edge_index_batch)
-
-            # Prepare edge features by concatenating the embeddings of the head and tail nodes
-            edge_embeddings = torch.cat(
-                [
-                    node_embeddings_out[edge_index_batch[0]],
-                    node_embeddings_out[edge_index_batch[1]],
-                ],
-                dim=1,
-            )
-
-            # Forward pass through MLP for edge classification
-            out = edge_classifier_model(edge_embeddings)
-
-            # Compute loss
-            loss = criterion(out, edge_labels_batch)
-
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-
-            # Accumulate metrics
-            total_loss += loss.item()
-            preds = out.argmax(dim=1)
-            total_correct += (preds == edge_labels_batch).sum().item()
-            total_samples += edge_labels_batch.size(0)
+            total_loss += loss
+            total_correct += correct
+            total_samples += samples
         avg_loss = total_loss / len(batches)
         accuracy = total_correct / total_samples
         
@@ -140,8 +98,8 @@ def train(cfg: DictConfig) -> None:
 
         # logger.info(f"Epoch {epoch:02d}/{cfg.train.n_epochs} | Loss: {avg_loss:.4f} | Accuracy: {accuracy:.4f}")
         wandb.log({
-            'epoch': epoch,
-            'loss': avg_loss,
-            'accuracy': accuracy
+            'train/epoch': epoch,
+            'train/loss': avg_loss,
+            'train/accuracy': accuracy
         })
     wandb.finish()
