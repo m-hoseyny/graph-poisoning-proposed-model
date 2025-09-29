@@ -1,0 +1,4 @@
+name: "sage"
+hidden_dim: 32
+dropout: 0.1
+aggregator: "mean" # "mean", "max", "sum", or "lstm"
