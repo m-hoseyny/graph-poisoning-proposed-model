@@ -20,6 +20,7 @@ import multiprocessing as mp
 from utils import random_walk, rw_task, ego_task
 from datasets.create_directed_cora import DirectedCoraDataset
 from torch_geometric.transforms import ToUndirected
+from torch_geometric.utils import degree
 
 from typing import List
 
@@ -37,8 +38,10 @@ class CoraDataset(Dataset):
         self.edge_att_dict = {}
         self.removed_samples: List[Data] = []
         
-        # self.edge_gcn_attributes = torch.load('/mnt/data/mohammad-hosseini/DiGress/SaGess/cora_gcn_simplified_performance.pt')
-        with open('/mnt/data/mohammad-hosseini/DiGress/SaGess/directed_cora_attributes.pt', 'rb') as f:
+        # Use absolute path based on project root
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+        dataset_path = os.path.join(project_root, 'datasets', 'directed_cora_attributes.pt')
+        with open(dataset_path, 'rb') as f:
             self.edge_gcn_attributes = pickle.load(f)
         
         base_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), os.pardir, os.pardir, 'data')
@@ -53,11 +56,11 @@ class CoraDataset(Dataset):
         # print(graphs.data.has_isolated_nodes())
         
         if directed_graph == True:
-            edge_list = graphs.data.edge_index
+            edge_list = graphs[0].edge_index
             edge_list_nx = [(int(i[0]), int(i[1])) for i in edge_list.transpose(0, 1)]
             self.nx_graph = nx.from_edgelist(edge_list_nx, create_using=nx.DiGraph)
         else:
-            edge_list = to_undirected(graphs.data.edge_index)
+            edge_list = to_undirected(graphs[0].edge_index)
             edge_list_nx = [(int(i[0]), int(i[1])) for i in edge_list.transpose(0, 1)]
             self.nx_graph = nx.from_edgelist(edge_list_nx)
 
@@ -336,7 +339,14 @@ class CoraDataset(Dataset):
         
         # Randomly select nodes to remove
         random.seed(42)  # For reproducibility
-        self.removed_nodes = random.sample(all_nodes, min(num_nodes, len(all_nodes)))
+        edge_index = self.graphs[0].edge_index
+        num_nodes = self.graphs[0].num_nodes
+        node_degrees = degree(edge_index[0], num_nodes=num_nodes).to('cpu')
+        nodes_with_min_edges = (node_degrees >= self.cfg.dataset.min_number_edges).nonzero(as_tuple=True)[0]
+        selected_nodes = nodes_with_min_edges
+        selected_nodes_set = set(selected_nodes.tolist()) 
+        # self.removed_nodes = random.sample(all_nodes, min(num_nodes, len(all_nodes)))
+        self.removed_nodes = list(selected_nodes_set)
         with open('./removed_nodes.pkl', 'wb') as f:
             pickle.dump(self.removed_nodes, f)
         print(f"Selected {len(self.removed_nodes)} nodes for inference")
@@ -436,7 +446,7 @@ class CoraDataModule(AbstractDataModule):
         print(f'Dataset sizes: train {train_len}, val {val_len}, test {test_len}')
         splits = random_split(self.graphs, [train_len, val_len, test_len], generator=torch.Generator().manual_seed(1234))
 
-        datasets = {'train': splits[0], 'val': splits[1], 'test': splits[2]}
+        datasets = {'train': splits[0], 'val': splits[1], 'test': self.graphs.removed_samples}
         super().prepare_data(datasets)
 
 
