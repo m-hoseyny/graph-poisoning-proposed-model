@@ -47,7 +47,8 @@ def setup_wandb(cfg):
     elif cfg.dataset.sampling_method == 'mix':
         sample_size = cfg.dataset.per_node_samples_rw + cfg.dataset.per_node_samples_ego + cfg.dataset.per_node_samples_unif
     dataset_name = cfg.dataset.name + '_' + cfg.dataset.sampling_method + str(sample_size)
-    
+    if cfg.general.test_only is True:
+        dataset_name = 'test_' + dataset_name
     model_name = cfg.gnn_model.name + '_' + cfg.edge_classifier_model.name
     datetim_string = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     config_dict = omegaconf.OmegaConf.to_container(cfg, resolve=True, throw_on_missing=True)

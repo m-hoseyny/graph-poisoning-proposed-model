@@ -1,0 +1,206 @@
+from omegaconf import DictConfig
+from model.gcn import get_gcn_model, get_edge_mlp_model
+from model.gat import get_gat_model
+from model.sage import get_sage_model
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import logging
+import time
+import os
+import wandb
+from datetime import datetime
+import omegaconf
+from datasets.cora_dataset import CoraDataModule
+import tqdm
+from utils import get_cross_entropy_loss, setup_wandb
+from model.process import eval_process
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
+
+
+logger = logging.getLogger(__name__)
+
+
+def load_model_gnn(cfg: DictConfig) -> nn.Module:
+    '''
+    Load the GNN model from checkpoint
+    '''
+    # First create the model with the same architecture
+    if cfg.gnn_model.name == "gcn":
+        model = get_gcn_model(cfg)
+    elif cfg.gnn_model.name == "gat":
+        model = get_gat_model(cfg)
+    elif cfg.gnn_model.name == "sage":
+        model = get_sage_model(cfg)
+    else:
+        raise ValueError(f"Unknown model: {cfg.gnn_model.name}")
+    
+    # Then load the state dict from checkpoint
+    checkpoint = torch.load(cfg.general.gnn_model_path)
+    model.load_state_dict(checkpoint['model_state_dict'])
+    logger.info(f"Loaded GNN model from {cfg.general.gnn_model_path}, epoch {checkpoint['epoch']}")
+    return model
+
+
+def load_model_edge_classifier(cfg: DictConfig) -> nn.Module:
+    '''
+    Load the edge classifier model from checkpoint
+    '''
+    # Create the model with the same architecture
+    model = get_edge_mlp_model(cfg)
+    
+    # Load the state dict from checkpoint
+    checkpoint = torch.load(cfg.general.edge_classifier_model_path)
+    model.load_state_dict(checkpoint['model_state_dict'])
+    logger.info(f"Loaded edge classifier model from {cfg.general.edge_classifier_model_path}, epoch {checkpoint['epoch']}")
+    return model
+
+
+# def merge
+
+
+def test(cfg: DictConfig) -> None:
+    logger.info("Testing started")
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    logger.info(f"Using device: {device}")
+    
+    # Check if checkpoint paths are provided
+    if cfg.general.gnn_model_path is None or cfg.general.edge_classifier_model_path is None:
+        raise ValueError("Please provide paths to both GNN and edge classifier model checkpoints")
+    
+    # Load models from checkpoints
+    logger.info(f"Loading models from checkpoints")
+    gnn_model = load_model_gnn(cfg)
+    gnn_model.to(device)
+    gnn_model.eval()  # Set model to evaluation mode
+    
+    edge_classifier_model = load_model_edge_classifier(cfg)
+    edge_classifier_model.to(device)
+    edge_classifier_model.eval()  # Set model to evaluation mode
+    
+    # Load dataset
+    dataset_name = cfg.dataset.name
+    logger.info(f"Using dataset: {dataset_name}")
+    
+    if dataset_name == "Cora":
+        datamodule = CoraDataModule(cfg)
+        test_dataset = datamodule.graphs.removed_samples
+    else:
+        raise ValueError(f"Unknown dataset: {dataset_name}")
+    
+    # Setup wandb for logging
+    cfg = setup_wandb(cfg)
+    
+    # Define loss function
+    criterion = get_cross_entropy_loss(cfg)
+    
+    # Test the model
+    logger.info("Starting evaluation on test dataset")
+    start_time = time.time()
+    
+    total_loss = 0
+    total_correct = 0
+    total_samples = 0
+    
+    # Create batches
+    batches = [test_dataset[i : i + cfg.dataset.batch_size] for i in range(0, len(test_dataset), cfg.dataset.batch_size)]
+    
+    # Create lists to store samples with predicted edge attributes
+    samples_with_predictions = []
+    
+    # Disable gradient computation for evaluation
+    sample_id = 0
+    # Save samples with predictions
+    output_dir = os.path.join('outputs', 'predictions')
+    os.makedirs(output_dir, exist_ok=True)
+    for batch_idx, batch in enumerate(batches):
+        logger.info(f"Processing batch {batch_idx+1}/{len(batches)}")
+        
+        # Store original edge attributes for each graph in the batch
+        original_edge_attrs = [graph.edge_attr.clone() for graph in batch]
+        
+        # Track edge offsets for mapping predictions back to the correct edges
+        edge_offsets = [0]
+        for i, graph in enumerate(batch[:-1]):
+            edge_offsets.append(edge_offsets[i] + graph.edge_index.shape[1])
+        
+        # Process the batch using the same function as in training
+        _, _, loss, preds, edge_labels_batch = eval_process(
+            batch, 
+            gnn_model, 
+            edge_classifier_model, 
+            device, 
+            None,  # No optimizer during testing
+            criterion
+        )
+        
+        # Accumulate metrics
+        # preds_cpu = preds.cpu().numpy()
+        # labels_cpu = edge_labels_batch.cpu().numpy()
+        # precision = precision_score(labels_cpu, preds_cpu, average=None)
+        # recall = recall_score(labels_cpu, preds_cpu, average=None)
+        # f1 = f1_score(labels_cpu, preds_cpu, average=None)
+        # cm = confusion_matrix(labels_cpu, preds_cpu)
+        # accuracy = accuracy_score(labels_cpu, preds_cpu)
+        
+        # logger.info(f"Batch {batch_idx+1} metrics:")
+        # logger.info(f"  Accuracy: {accuracy:.4f}")
+        # logger.info(f"  Precision: {precision}")
+        # logger.info(f"  Recall: {recall}")
+        # logger.info(f"  F1: {f1}")
+        # logger.info(f"  Confusion Matrix:\n{cm}")
+        
+        # Create new samples with predicted edge attributes
+        for i, graph in enumerate(batch):
+            # Get predictions for this graph's edges
+            start_idx = edge_offsets[i]
+            end_idx = edge_offsets[i] + graph.edge_index.shape[1] if i < len(batch) - 1 else len(preds)
+            graph_preds = preds[start_idx:end_idx]
+            
+            # Create one-hot encoded edge attributes from predictions
+            num_classes = graph.edge_attr.shape[1]
+            pred_edge_attr = F.one_hot(graph_preds, num_classes=num_classes).float()
+            
+            # Create a new graph with predicted edge attributes
+            from torch_geometric.data import Data
+            pred_graph = Data(
+                x=graph.x.clone(),
+                edge_index=graph.edge_index.clone(),
+                edge_attr=pred_edge_attr,
+                y=graph.y.clone() if hasattr(graph, 'y') else None,
+                original_edge_attr=graph.edge_attr.clone(),  # Store original for comparison
+                pred_edge_class=graph_preds.clone()  # Store raw predictions
+            )
+            
+            # Add sample ID and other metadata
+            pred_graph.sample_id = f"batch_{batch_idx}_sample_{i}"
+            
+            # Store the sample
+            torch.save(pred_graph, os.path.join(output_dir, f'sample_{sample_id}.pt'))
+            sample_id += 1
+            samples_with_predictions.append(pred_graph)
+        
+        total_loss += loss
+        total_correct += (preds == edge_labels_batch).sum().item()
+        total_samples += edge_labels_batch.size(0)
+    
+        # Calculate final metrics
+        avg_loss = total_loss / len(batches) if len(batches) > 0 else 0
+        accuracy = total_correct / total_samples if total_samples > 0 else 0
+        
+        # Log overall results
+        logger.info(f"Overall Test Results | Loss: {avg_loss:.4f} | Accuracy: {accuracy:.4f}")
+        
+        # Log to wandb
+        wandb.log({
+            'test/accuracy': accuracy,
+            'test/loss': avg_loss
+        })
+        
+    
+    # Calculate and log execution time
+    end_time = time.time()
+    execution_time = end_time - start_time
+    logger.info(f"Testing completed in {execution_time:.2f} seconds")
+    
+    wandb.finish()
