@@ -59,7 +59,7 @@ def load_model_edge_classifier(cfg: DictConfig) -> nn.Module:
 # def merge
 
 
-def test(cfg: DictConfig) -> None:
+def test_once(cfg: DictConfig, test_number: int = 0) -> None:
     logger.info("Testing started")
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     logger.info(f"Using device: {device}")
@@ -84,7 +84,7 @@ def test(cfg: DictConfig) -> None:
     
     if dataset_name == "Cora":
         datamodule = CoraDataModule(cfg)
-        test_dataset = datamodule.graphs.removed_samples
+        test_dataset = datamodule.graphs.test_dataset
     else:
         raise ValueError(f"Unknown dataset: {dataset_name}")
     
@@ -103,8 +103,8 @@ def test(cfg: DictConfig) -> None:
     total_samples = 0
     
     # Create batches
-    batches = [test_dataset[i : i + cfg.dataset.batch_size] for i in range(0, len(test_dataset), cfg.dataset.batch_size)]
-    
+    # batches = [test_dataset[i : i + cfg.dataset.batch_size] for i in range(0, len(test_dataset), cfg.dataset.batch_size)]
+    batches = [[test_dataset[i]] for i in range(len(test_dataset))]
     # Create lists to store samples with predicted edge attributes
     samples_with_predictions = []
     
@@ -115,10 +115,7 @@ def test(cfg: DictConfig) -> None:
     os.makedirs(output_dir, exist_ok=True)
     for batch_idx, batch in enumerate(batches):
         logger.info(f"Processing batch {batch_idx+1}/{len(batches)}")
-        
-        # Store original edge attributes for each graph in the batch
-        original_edge_attrs = [graph.edge_attr.clone() for graph in batch]
-        
+              
         # Track edge offsets for mapping predictions back to the correct edges
         edge_offsets = [0]
         for i, graph in enumerate(batch[:-1]):
@@ -135,20 +132,20 @@ def test(cfg: DictConfig) -> None:
         )
         
         # Accumulate metrics
-        # preds_cpu = preds.cpu().numpy()
-        # labels_cpu = edge_labels_batch.cpu().numpy()
-        # precision = precision_score(labels_cpu, preds_cpu, average=None)
-        # recall = recall_score(labels_cpu, preds_cpu, average=None)
-        # f1 = f1_score(labels_cpu, preds_cpu, average=None)
-        # cm = confusion_matrix(labels_cpu, preds_cpu)
-        # accuracy = accuracy_score(labels_cpu, preds_cpu)
+        preds_cpu = preds.cpu().numpy()
+        labels_cpu = edge_labels_batch.cpu().numpy()
+        precision = precision_score(labels_cpu, preds_cpu, average=None)
+        recall = recall_score(labels_cpu, preds_cpu, average=None)
+        f1 = f1_score(labels_cpu, preds_cpu, average=None)
+        cm = confusion_matrix(labels_cpu, preds_cpu)
+        accuracy = accuracy_score(labels_cpu, preds_cpu)
         
-        # logger.info(f"Batch {batch_idx+1} metrics:")
-        # logger.info(f"  Accuracy: {accuracy:.4f}")
-        # logger.info(f"  Precision: {precision}")
-        # logger.info(f"  Recall: {recall}")
-        # logger.info(f"  F1: {f1}")
-        # logger.info(f"  Confusion Matrix:\n{cm}")
+        logger.info(f"Batch {batch_idx+1} metrics:")
+        logger.info(f"  Accuracy: {accuracy:.4f}")
+        logger.info(f"  Precision: {precision}")
+        logger.info(f"  Recall: {recall}")
+        logger.info(f"  F1: {f1}")
+        logger.info(f"  Confusion Matrix:\n{cm}")
         
         # Create new samples with predicted edge attributes
         for i, graph in enumerate(batch):
@@ -159,25 +156,24 @@ def test(cfg: DictConfig) -> None:
             
             # Create one-hot encoded edge attributes from predictions
             num_classes = graph.edge_attr.shape[1]
-            pred_edge_attr = F.one_hot(graph_preds, num_classes=num_classes).float()
+            print(graph_preds)
+            # pred_edge_attr = F.one_hot(graph_preds, num_classes=num_classes).float()
             
             # Create a new graph with predicted edge attributes
             from torch_geometric.data import Data
             pred_graph = Data(
                 x=graph.x.clone(),
                 edge_index=graph.edge_index.clone(),
-                edge_attr=pred_edge_attr,
-                y=graph.y.clone() if hasattr(graph, 'y') else None,
+                edge_attr=graph_preds.to('cpu'),
+                # y=graph.y.clone() if hasattr(graph, 'y') else None,
                 original_edge_attr=graph.edge_attr.clone(),  # Store original for comparison
-                pred_edge_class=graph_preds.clone()  # Store raw predictions
+                original_cora_edge_index=graph.original_edge_index.clone(),
+                pred_edge_class=graph_preds.clone(),  # Store raw predictions,
+                target_node_id=graph.target_node_id
             )
             
-            # Add sample ID and other metadata
-            pred_graph.sample_id = f"batch_{batch_idx}_sample_{i}"
-            
             # Store the sample
-            torch.save(pred_graph, os.path.join(output_dir, f'sample_{sample_id}.pt'))
-            sample_id += 1
+            torch.save(pred_graph, os.path.join(output_dir, f'sample_t{test_number}_s{graph.target_node_id}.pt'))
             samples_with_predictions.append(pred_graph)
         
         total_loss += loss
@@ -204,3 +200,9 @@ def test(cfg: DictConfig) -> None:
     logger.info(f"Testing completed in {execution_time:.2f} seconds")
     
     wandb.finish()
+    
+    
+def test(cfg: DictConfig):
+    for i in range(cfg.general.number_of_tests):
+        test_once(cfg, test_number=i)
+    
