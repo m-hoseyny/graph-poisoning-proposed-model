@@ -9,7 +9,7 @@ import torch
 torch.manual_seed(120)
 from torch.utils.data import random_split, Dataset
 from torch_geometric.data import Data
-from torch_geometric.utils import subgraph, to_undirected
+from torch_geometric.utils import subgraph, to_undirected, k_hop_subgraph
 from torch_geometric.datasets import EmailEUCore, Planetoid, AttributedGraphDataset, SNAPDataset
 from datasets.abstract_dataset import AbstractDataModule, AbstractDatasetInfos
 import torch.nn.functional as F
@@ -37,10 +37,16 @@ class CoraDataset(Dataset):
         self.original_node_attribute = self.cfg.dataset.original_node_attribute
         self.edge_att_dict = {}
         self.removed_samples: List[Data] = []
+        self.test_dataset: List[Data] = []
+        self.test_dataset_original_edges = []
         
         # Use absolute path based on project root
         project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-        dataset_path = os.path.join(project_root, 'datasets', 'directed_cora_attributes.pt')
+        # dataset_path = os.path.join(project_root, 'datasets', 'directed_cora_attributes.pt')
+        if cfg.gnn_model.name == 'gcn':
+            dataset_path = os.path.join(project_root, 'datasets', 'Cora_gcn_edge_performance.pkl')
+        elif cfg.gnn_model.name == 'sage':
+            dataset_path = os.path.join(project_root, 'datasets', 'Cora_sage_edge_performance.pkl')
         with open(dataset_path, 'rb') as f:
             self.edge_gcn_attributes = pickle.load(f)
         
@@ -171,7 +177,7 @@ class CoraDataset(Dataset):
         if self.cfg.dataset.get('remove_inference_nodes', False):
             num_nodes_to_remove = self.cfg.dataset.get('num_inference_nodes', 100)
             self.remove_nodes_for_inference(Train_data, num_nodes_to_remove)
-            
+            self.create_test_dataset()
         self.data = Train_data
 
     # def get_edge_attributes(self, x, edge_index):
@@ -197,7 +203,7 @@ class CoraDataset(Dataset):
     #         dtype = torch.long).transpose(0,1)
     #     return edge_attr
     
-    def get_edge_attributes(self, x, edge_index):
+    def get_edge_attributes(self, x, edge_index, test=False):
         edge_att = []
         edge_pairs = []  # store undirected pairs for reconstruction
         center_node_id = x[0].item()
@@ -208,19 +214,22 @@ class CoraDataset(Dataset):
         for j in range(edge_size[1]):
             node_1 = edge_index[0, j].item()
             node_2 = edge_index[1, j].item()
-            node_1_id = x[node_1].item()
-            node_2_id = x[node_2].item()
+            if not test:
+                node_1_id = x[node_1].item()
+                node_2_id = x[node_2].item()
+            else:
+                node_1_id = node_1
+                node_2_id = node_2
             # node_1_id, node_2_id = sorted([node_1_id, node_2_id])
             if node_1_id not in self.edge_gcn_attributes:
                 local_edge_att = 1000
             else:
                 if (node_1_id, node_2_id) in self.edge_gcn_attributes[node_1_id]:
-                    local_edge_att = self.edge_gcn_attributes[node_1_id][(node_1_id, node_2_id)]
+                    local_edge_att = self.edge_gcn_attributes[node_1_id][(node_1_id, node_2_id)][-1][0]
                 elif (node_2_id, node_1_id) in self.edge_gcn_attributes[node_1_id]:
-                    local_edge_att = self.edge_gcn_attributes[node_1_id][(node_2_id, node_1_id)]
+                    local_edge_att = self.edge_gcn_attributes[node_1_id][(node_2_id, node_1_id)][-1][0]
                 else:
                     local_edge_att = 500
-
             edge_att.append(local_edge_att)
             node_mapper[(node_1, node_2)] = (node_1_id, node_2_id)
             edge_pairs.append((node_1, node_2))  # keep directed for reconstruction
@@ -372,6 +381,24 @@ class CoraDataset(Dataset):
         self.sample_size = len(filtered_data)
         
         return filtered_data
+    
+    def create_test_dataset(self):
+        # radius = self.cfg.dataset.ego_sample_radius
+        radius = 1
+        for node_id in self.removed_nodes:
+            subset, edge_index, mapping, edge_mask = k_hop_subgraph(node_id, 
+                                                                    num_hops=radius, 
+                                                                    edge_index=self.graphs[0].edge_index,
+                                                                    relabel_nodes=True)
+            original_edge_index = self.graphs[0].edge_index[:, edge_mask]
+            edge_attr = self.get_edge_attributes(subset.unsqueeze(1), original_edge_index, test=True)
+            x = self.graphs[0].x[subset]
+            ego_graph = Data(x=x, edge_index=edge_index, 
+                             edge_attr=edge_attr, 
+                             original_edge_index=original_edge_index, 
+                             target_node_id=node_id)
+            self.test_dataset.append(ego_graph)
+        return self.test_dataset
 
     # Note: slower than regular rw 
     def random_walk_sample_threaded(self, per_node_samples=30, subgraph_size=20, max_workers=2):
