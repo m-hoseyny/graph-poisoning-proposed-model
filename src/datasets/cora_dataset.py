@@ -44,7 +44,7 @@ class CoraDataset(Dataset):
         project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
         # dataset_path = os.path.join(project_root, 'datasets', 'directed_cora_attributes.pt')
         if cfg.gnn_model.name == 'gcn':
-            dataset_path = os.path.join(project_root, 'datasets', 'Cora_gcn_edge_performance.pkl')
+            dataset_path = os.path.join(project_root, 'datasets', 'EPAGCL_Cora_gcn_edge_performance.pkl')
         elif cfg.gnn_model.name == 'sage':
             dataset_path = os.path.join(project_root, 'datasets', 'Cora_sage_edge_performance.pkl')
         with open(dataset_path, 'rb') as f:
@@ -221,51 +221,38 @@ class CoraDataset(Dataset):
                 node_1_id = node_1
                 node_2_id = node_2
             # node_1_id, node_2_id = sorted([node_1_id, node_2_id])
-            if node_1_id not in self.edge_gcn_attributes:
-                local_edge_att = 1000
-            else:
-                if (node_1_id, node_2_id) in self.edge_gcn_attributes[node_1_id]:
-                    local_edge_att = self.edge_gcn_attributes[node_1_id][(node_1_id, node_2_id)][-1][0]
-                elif (node_2_id, node_1_id) in self.edge_gcn_attributes[node_1_id]:
-                    local_edge_att = self.edge_gcn_attributes[node_1_id][(node_2_id, node_1_id)][-1][0]
-                else:
-                    local_edge_att = 500
+            if (node_1_id, node_2_id) in self.edge_gcn_attributes[node_1_id]:
+                local_edge_att = self.edge_gcn_attributes[node_1_id][(node_1_id, node_2_id)][-1][0]
+            elif (node_2_id, node_1_id) in self.edge_gcn_attributes[node_1_id]:
+                local_edge_att = self.edge_gcn_attributes[node_1_id][(node_2_id, node_1_id)][-1][0]
+            
             edge_att.append(local_edge_att)
             node_mapper[(node_1, node_2)] = (node_1_id, node_2_id)
             edge_pairs.append((node_1, node_2))  # keep directed for reconstruction
 
         edge_att = torch.tensor(edge_att)
 
-        # Step 2: group by undirected edge (avoid duplicates)
-        unique_edges = {}
-        for idx, (u, v) in enumerate(edge_pairs):
-            uv = tuple(sorted((u, v)))   # undirected key
-            if uv not in unique_edges:
-                unique_edges[uv] = edge_att[idx]
+        unique_edges = dict(zip(edge_pairs, edge_att))
 
         # Step 3: rank unique edges by attribute values
-        sorted_edges = sorted(unique_edges.items(), key=lambda kv: kv[1])
+        sorted_edges = sorted(unique_edges.items(), key=lambda kv: kv[1], reverse=True)
 
         edge_labels = {}
         batches = len(sorted_edges) // classes if len(sorted_edges) >= classes else 1
         for k, (uv, val) in enumerate(sorted_edges):
-            if val == 1000:
-                label = 4
-            elif k < batches:
+            if k < batches:
                 label = 1
             elif k < 2 * batches:
                 label = 2
-            else:
+            elif k < 3 * batches:
                 label = 3
+            else:
+                label = 4
             edge_labels[uv] = label
             self.edge_att_dict[node_mapper[uv]] = label
 
         # Step 4: reconstruct labels in original order (symmetry guaranteed)
-        labels = []
-        for u, v in edge_pairs:
-            uv = tuple(sorted((u, v)))
-            labels.append(edge_labels[uv])
-            # print(uv, edge_labels[uv])
+        labels = list(edge_labels.values())
 
         labels = torch.tensor(labels, dtype=torch.int8)
         labels = F.one_hot(labels.long(), num_classes=classes + 1).float()
@@ -396,7 +383,8 @@ class CoraDataset(Dataset):
             ego_graph = Data(x=x, edge_index=edge_index, 
                              edge_attr=edge_attr, 
                              original_edge_index=original_edge_index, 
-                             target_node_id=node_id)
+                             target_node_id=node_id,
+                             center_node_mapping=mapping[0].item())
             self.test_dataset.append(ego_graph)
         return self.test_dataset
 
