@@ -89,7 +89,7 @@ def test_once(cfg: DictConfig, test_number: int = 0) -> None:
         raise ValueError(f"Unknown dataset: {dataset_name}")
     
     # Setup wandb for logging
-    cfg = setup_wandb(cfg)
+
     
     # Define loss function
     criterion = get_cross_entropy_loss(cfg)
@@ -134,9 +134,9 @@ def test_once(cfg: DictConfig, test_number: int = 0) -> None:
         # Accumulate metrics
         preds_cpu = preds.cpu().numpy()
         labels_cpu = edge_labels_batch.cpu().numpy()
-        precision = precision_score(labels_cpu, preds_cpu, average=None)
-        recall = recall_score(labels_cpu, preds_cpu, average=None)
-        f1 = f1_score(labels_cpu, preds_cpu, average=None)
+        precision = precision_score(labels_cpu, preds_cpu, average='macro')
+        recall = recall_score(labels_cpu, preds_cpu, average='macro')
+        f1 = f1_score(labels_cpu, preds_cpu, average='macro')
         cm = confusion_matrix(labels_cpu, preds_cpu)
         accuracy = accuracy_score(labels_cpu, preds_cpu)
         
@@ -190,7 +190,10 @@ def test_once(cfg: DictConfig, test_number: int = 0) -> None:
         # Log to wandb
         wandb.log({
             'test/accuracy': accuracy,
-            'test/loss': avg_loss
+            'test/loss': avg_loss,
+            'test/precision': precision,
+            'test/recall': recall,
+            'test/f1': f1
         })
         
     
@@ -199,10 +202,13 @@ def test_once(cfg: DictConfig, test_number: int = 0) -> None:
     execution_time = end_time - start_time
     logger.info(f"Testing completed in {execution_time:.2f} seconds")
     
-    wandb.finish()
+
     
     
 def test(cfg: DictConfig):
+    cfg = setup_wandb(cfg)
     for i in range(cfg.general.number_of_tests):
         test_once(cfg, test_number=i)
+    
+    wandb.finish()
     
