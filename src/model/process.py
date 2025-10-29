@@ -12,6 +12,7 @@ def process(batch, gnn_model, edge_classifier_model, device, optimizer, criterio
     
     edge_labels_all = []
     for graph in batch:
+        # edge_labels_all.append(graph.edge_attr)
         edge_labels_all.append(torch.argmax(graph.edge_attr, dim=1))
     edge_labels_batch = torch.cat(edge_labels_all, dim=0).to(device)
 
@@ -46,10 +47,9 @@ def process(batch, gnn_model, edge_classifier_model, device, optimizer, criterio
     loss = criterion(out, edge_labels_batch)
 
     # Only perform backpropagation if optimizer is provided (training mode)
-    if optimizer is not None:
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
 
     # Accumulate metrics
     total_loss = loss.item()
@@ -64,7 +64,6 @@ def eval_process(batch, gnn_model, edge_classifier_model, device, optimizer, cri
         num_nodes_all = [graph.x.shape[0] for graph in batch]
         node_features_all = [graph.x for graph in batch]
         node_feature_batch = torch.cat(node_features_all, dim=0).to(device)
-    
         # Get edge indices (already in COO format: [2, num_edges])
         edge_index_all = []
         for graph in batch:
@@ -72,6 +71,7 @@ def eval_process(batch, gnn_model, edge_classifier_model, device, optimizer, cri
         
         edge_labels_all = []
         for graph in batch:
+            # edge_labels_all.append(graph.edge_attr)
             edge_labels_all.append(torch.argmax(graph.edge_attr, dim=1))
         edge_labels_batch = torch.cat(edge_labels_all, dim=0).to(device)
 

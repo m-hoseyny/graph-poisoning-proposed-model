@@ -31,32 +31,35 @@ def train(cfg: DictConfig) -> None:
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     logger.info(f"Using device: {device}")
     logger.info(f"Using model: {cfg.gnn_model.name}")
-    if cfg.gnn_model.name == "gcn":
-        gnn_model = get_gcn_model(cfg).to(device)
-        edge_classifier_model = get_edge_mlp_model(cfg).to(device)
-    elif cfg.gnn_model.name == "gat":
-        gnn_model = get_gat_model(cfg).to(device)
-        edge_classifier_model = get_edge_mlp_model(cfg).to(device)
-    elif cfg.gnn_model.name == "sage":
-        gnn_model = get_sage_model(cfg).to(device)
-        edge_classifier_model = get_edge_mlp_model(cfg).to(device)
-    else:
-        raise ValueError(f"Unknown model: {cfg.gnn_model.name}")
+    # if cfg.gnn_model.name == "gcn":
+    #     gnn_model = get_gcn_model(cfg).to(device)
+    #     edge_classifier_model = get_edge_mlp_model(cfg).to(device)
+    # elif cfg.gnn_model.name == "gat":
+    #     gnn_model = get_gcn_model(cfg).to(device)
+    #     edge_classifier_model = get_edge_mlp_model(cfg).to(device)
+    # elif cfg.gnn_model.name == "sage":
+    #     # TODO: Be careful! The model has been changed!
+    #     gnn_model = get_gcn_model(cfg).to(device)
+    #     edge_classifier_model = get_edge_mlp_model(cfg).to(device)
+    # else:
+    #     raise ValueError(f"Unknown model: {cfg.gnn_model.name}")
+
+    gnn_model = get_gcn_model(cfg).to(device)
+    edge_classifier_model = get_edge_mlp_model(cfg).to(device)
     
     dataset_name = cfg.dataset.name
     logger.info(f"Using dataset: {dataset_name}")
     
-    if dataset_name == "Cora":
-        datamodule = CoraDataModule(cfg)
-        dataset = datamodule.graphs
-        
-    else:
-        raise ValueError(f"Unknown dataset: {dataset_name}")
+    # if dataset_name == "Cora":
+    datamodule = CoraDataModule(cfg)
+    dataset = datamodule.graphs
+    # else:
+    #     raise ValueError(f"Unknown dataset: {dataset_name}")
     cfg = setup_wandb(cfg)
     optimizer = get_optimiser(cfg, gnn_model, edge_classifier_model)
     criterion = get_cross_entropy_loss(cfg)
     logger.info("Training started, for {} epochs".format(cfg.train.n_epochs))
-    time.sleep(1)
+
     start_time = time.time()
     accuracy = 0
     loss = 0

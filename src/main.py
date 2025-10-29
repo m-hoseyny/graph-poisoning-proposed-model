@@ -5,6 +5,7 @@ from test import test
 
 @hydra.main(version_base='1.1', config_path="../configs", config_name="config")
 def main(cfg : DictConfig) -> None:
+    print(cfg)
     if cfg.general.test_only is False:
         train(cfg)
     else:
