@@ -10,7 +10,7 @@ torch.manual_seed(120)
 from torch.utils.data import random_split, Dataset
 from torch_geometric.data import Data
 from torch_geometric.utils import subgraph, to_undirected, k_hop_subgraph
-from torch_geometric.datasets import EmailEUCore, Planetoid, AttributedGraphDataset, SNAPDataset
+from torch_geometric.datasets import EmailEUCore, Planetoid, AttributedGraphDataset, SNAPDataset, WikipediaNetwork
 from datasets.abstract_dataset import AbstractDataModule, AbstractDatasetInfos
 import torch.nn.functional as F
 import torch_geometric.transforms as T
@@ -18,7 +18,7 @@ import pickle
 from tqdm import tqdm
 import multiprocessing as mp 
 from utils import random_walk, rw_task, ego_task
-from datasets.create_directed_cora import DirectedCoraDataset
+
 from torch_geometric.transforms import ToUndirected
 from torch_geometric.utils import degree
 
@@ -39,24 +39,53 @@ class CoraDataset(Dataset):
         self.removed_samples: List[Data] = []
         self.test_dataset: List[Data] = []
         self.test_dataset_original_edges = []
+
+        self.attribute_task = self.cfg.general.attribute_task
         
         # Use absolute path based on project root
         project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+        print(f'-------\ntask {self.attribute_task}\n-------')
         # dataset_path = os.path.join(project_root, 'datasets', 'directed_cora_attributes.pt')
-        if cfg.gnn_model.name == 'gcn':
-            dataset_path = os.path.join(project_root, 'datasets', 'EPAGCL_Cora_gcn_edge_performance.pkl')
-        elif cfg.gnn_model.name == 'sage':
-            dataset_path = os.path.join(project_root, 'datasets', 'Cora_sage_edge_performance.pkl')
+        if self.attribute_task == 'class':
+            dataset_path = os.path.join(project_root, 'datasets', f'new_EPAGCL_{self.data_file}_{self.cfg.gnn_model.name}_class_performance.pkl')
+        elif self.attribute_task == 'edge':
+            dataset_path = os.path.join(project_root, 'datasets', f'EPAGCL_Full_{self.data_file}_{self.cfg.gnn_model.name}_edge_performance.pkl')
+        print('Edge performaces: ', dataset_path)
+        # if cfg.gnn_model.name == 'gcn' and self.data_file == 'Cora':
+        #     dataset_path = os.path.join(project_root, 'datasets', 'EPAGCL_Full_Cora_gcn_edge_performance.pkl')
+        # # elif cfg.gnn_model.name == 'sage' and self.data_file == 'Cora':
+        # #     dataset_path = os.path.join(project_root, 'datasets', 'Cora_sage_edge_performance.pkl')
+        # elif cfg.gnn_model.name == 'gat' and self.data_file == 'Cora':
+        #     dataset_path = os.path.join(project_root, 'datasets', 'EPAGCL_Full_Cora_gat_edge_performance.pkl')
+        
+        # if cfg.gnn_model.name == 'gcn' and self.data_file == 'CiteSeer':
+        #     dataset_path = os.path.join(project_root, 'datasets', 'EPAGCL_Full_CiteSeer_gcn_edge_performance.pkl')
+        # # elif cfg.gnn_model.name == 'sage' and self.data_file == 'CiteSeer':
+        # #     dataset_path = os.path.join(project_root, 'datasets', 'new_CiteSeer_sage_edge_performance.pkl')
+        # elif cfg.gnn_model.name == 'gat' and self.data_file == 'CiteSeer':
+        #     dataset_path = os.path.join(project_root, 'datasets', 'EPAGCL_Full_CiteSeer_gat_edge_performance.pkl')
+            
+        # if cfg.gnn_model.name == 'gcn' and self.data_file == 'Wikipedia':
+        #     dataset_path = os.path.join(project_root, 'datasets', 'new_Wikipedia_gcn_edge_performance.pkl')
+        # elif cfg.gnn_model.name == 'sage' and self.data_file == 'Wikipedia':
+        #     dataset_path = os.path.join(project_root, 'datasets', 'new_Wikipedia_sage_edge_performance.pkl')
+        # elif cfg.gnn_model.name == 'gat' and self.data_file == 'Wikipedia':
+        #     dataset_path = os.path.join(project_root, 'datasets', 'new_Wikipedia_gat_edge_performance.pkl')
+        
         with open(dataset_path, 'rb') as f:
             self.edge_gcn_attributes = pickle.load(f)
         
         base_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), os.pardir, os.pardir, 'data')
         directed_graph = False
-
-        graphs = Planetoid(base_path, self.data_file, transform=T.NormalizeFeatures())
+        
+        if self.data_file == 'Wikipedia':
+            graphs = WikipediaNetwork(base_path, name='chameleon', transform=T.NormalizeFeatures())
+            directed_graph = False
+        else:
+            graphs = Planetoid(base_path, self.data_file, transform=T.NormalizeFeatures())
         # graphs.data = load_directed_cora()
         # graphs = DirectedCoraDataset('/mnt/data/mohammad-hosseini/DiGress/SaGess/data/DirectedCora')
-        directed_graph = True 
+            directed_graph = True 
 
         self.graphs = graphs
         # print(graphs.data.has_isolated_nodes())
@@ -180,35 +209,13 @@ class CoraDataset(Dataset):
             self.create_test_dataset()
         self.data = Train_data
 
-    # def get_edge_attributes(self, x, edge_index):
-    #     edge_att = []
-    #     center_node_id = x[0].item()
-    #     for i in range(edge_index.size()[1]):
-    #         node_1 = edge_index[0][i].item()
-    #         node_2 = edge_index[1][i].item()
-    #         node_1, node_2 = sorted([node_1, node_2])
-    #         node_1_id = x[node_1].item()
-    #         node_2_id = x[node_2].item()
-    #         if node_1_id == center_node_id:
-    #             att_val = self.edge_gcn_attributes[node_1_id][(node_1_id, node_2_id)]
-    #             att_val = 1 if att_val > 0 else 0
-    #             edge_att.append(att_val)
-    #         else:
-    #             edge_att.append(1)
-    #     if len(edge_att) != edge_index.size()[1]:
-    #         raise Exception('Edge attributes do not match edge index')
-    #     edge_attr = torch.tensor(
-    #         [[0 for k in range(edge_index.size()[1])],
-    #         edge_att], 
-    #         dtype = torch.long).transpose(0,1)
-    #     return edge_attr
     
     def get_edge_attributes(self, x, edge_index, test=False):
         edge_att = []
         edge_pairs = []  # store undirected pairs for reconstruction
         center_node_id = x[0].item()
         edge_size = edge_index.size()
-        classes = 4
+        classes = self.cfg.dataset.edge_attribute_classes
         node_mapper = {}
         # Step 1: collect edge attributes in original order
         for j in range(edge_size[1]):
@@ -229,37 +236,35 @@ class CoraDataset(Dataset):
             edge_att.append(local_edge_att)
             node_mapper[(node_1, node_2)] = (node_1_id, node_2_id)
             edge_pairs.append((node_1, node_2))  # keep directed for reconstruction
+            
 
-        edge_att = torch.tensor(edge_att)
-
+        # edge_att = torch.tensor(edge_att)
         unique_edges = dict(zip(edge_pairs, edge_att))
 
         # Step 3: rank unique edges by attribute values
         sorted_edges = sorted(unique_edges.items(), key=lambda kv: kv[1], reverse=True)
-
         edge_labels = {}
-        batches = len(sorted_edges) // classes if len(sorted_edges) >= classes else 1
+        batches = len(sorted_edges) // classes if len(sorted_edges) >= classes else len(sorted_edges)
+
         for k, (uv, val) in enumerate(sorted_edges):
-            if k < batches:
-                label = 1
-            elif k < 2 * batches:
-                label = 2
-            elif k < 3 * batches:
-                label = 3
-            else:
-                label = 4
+            for th in range(classes ):
+                if th*batches <= k < (th+1)*batches:
+                    label = th 
+                    break
             edge_labels[uv] = label
             self.edge_att_dict[node_mapper[uv]] = label
+        
+        labels = []
+        for u, v in edge_pairs:
+            uv = (u, v)
+            labels.append(edge_labels[uv])
+            # print(uv, edge_labels[uv])
 
         # Step 4: reconstruct labels in original order (symmetry guaranteed)
-        labels = list(edge_labels.values())
-
+        labels = list(labels)
         labels = torch.tensor(labels, dtype=torch.int8)
-        labels = F.one_hot(labels.long(), num_classes=classes + 1).float()
+        labels = F.one_hot(labels.long(), num_classes=classes).float()
 
-        # Step 5: build edge_attr
-        # zeros = torch.zeros(edge_att.size(0), dtype=torch.int8).unsqueeze(1)
-        # edge_attr = torch.cat([zeros, labels], dim=1)
         edge_attr = labels
         return edge_attr
 
