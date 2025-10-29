@@ -5,7 +5,7 @@ wandb: 'online'             # online | offline | disabled
 gpus: 1                     # Multi-gpu is not implemented on this branch
 
 resume: null            # If resume, path to ckpt file from outputs directory in main directory
-test_only: null         # Use full path
+test_only: False         
 check_val_every_n_epochs: 50
 sample_every_val: 4
 val_check_interval: null
@@ -13,3 +13,6 @@ samples_to_generate: 10       # We advise to set it to 2 x batch_size maximum
 samples_to_save: 10
 
 log_every_steps: 50
+number_of_tests: 10
+attribute_task: 'edge'
+edge_model: 'clssifier' # clssifier for classification | basic, dotproduct, advanced for regression

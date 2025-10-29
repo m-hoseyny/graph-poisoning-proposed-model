@@ -33,6 +33,9 @@ def get_optimiser(cfg: DictConfig, gnn_model: nn.Module, edge_mlp: nn.Module) ->
 def get_cross_entropy_loss(cfg: DictConfig) -> nn.CrossEntropyLoss:
     return nn.CrossEntropyLoss()
 
+def get_mse_loss(cfg: DictConfig) -> nn.MSELoss:
+    return nn.MSELoss()
+
 
 def setup_wandb(cfg):
     # Disable wandb's Sentry error reporting to run on clusters
@@ -46,7 +49,7 @@ def setup_wandb(cfg):
         sample_size = cfg.dataset.per_node_samples_unif
     elif cfg.dataset.sampling_method == 'mix':
         sample_size = cfg.dataset.per_node_samples_rw + cfg.dataset.per_node_samples_ego + cfg.dataset.per_node_samples_unif
-    dataset_name = cfg.dataset.name + '_' + cfg.dataset.sampling_method + str(sample_size) + '_EdAtt' + str(cfg.dataset.edge_attribute_classes)
+    dataset_name = cfg.dataset.name + '_' + cfg.dataset.sampling_method + str(sample_size) + '_EdAtt' + str(cfg.dataset.edge_attribute_classes) + '_{}'.format(cfg.dataset.edge_attribute_mode)
     if cfg.general.test_only is True:
         dataset_name = 'test_' + dataset_name
     model_name = cfg.gnn_model.name + '_' + cfg.edge_classifier_model.name

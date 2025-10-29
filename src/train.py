@@ -1,6 +1,7 @@
 from omegaconf import DictConfig
 from torch._prims_common import corresponding_complex_dtype
 from model.gcn import get_gcn_model, get_edge_mlp_model
+from model.regressor import get_edge_regressor_model
 from model.gat import get_gat_model
 from model.sage import get_sage_model
 import torch
@@ -14,11 +15,12 @@ from datetime import datetime
 import omegaconf
 from datasets.cora_dataset import CoraDataModule
 import tqdm
-from utils import get_optimiser, get_cross_entropy_loss, setup_wandb
-from model.process import process, eval_process
+from utils import get_optimiser, get_cross_entropy_loss, setup_wandb, get_mse_loss
+from model.process import process, eval_process, process_regressor, eval_process_regressor
 from torch.utils.data import random_split
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix, mean_absolute_error, mean_squared_error, r2_score
+from scipy import stats
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +48,7 @@ def train(cfg: DictConfig) -> None:
 
     gnn_model = get_gcn_model(cfg).to(device)
     edge_classifier_model = get_edge_mlp_model(cfg).to(device)
-    
+
     dataset_name = cfg.dataset.name
     logger.info(f"Using dataset: {dataset_name}")
     
@@ -135,3 +137,101 @@ def train(cfg: DictConfig) -> None:
     wandb.finish()
     
     
+
+def train_regressor(cfg: DictConfig) -> None:
+    BASE_PATH = 'gnn-edge-regressor'
+    os.makedirs(BASE_PATH, exist_ok=True)
+    logger.info("Training started")
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    logger.info(f"Using device: {device}")
+    logger.info(f"Using model: {cfg.gnn_model.name}")
+    gnn_model = get_gcn_model(cfg).to(device)
+    edge_classifier_model = get_edge_regressor_model(cfg, model_type=cfg.general.edge_model).to(device)
+    
+    dataset_name = cfg.dataset.name
+    logger.info(f"Using dataset: {dataset_name}")
+    
+    # if dataset_name == "Cora":
+    datamodule = CoraDataModule(cfg)
+    dataset = datamodule.graphs
+    # else:
+    #     raise ValueError(f"Unknown dataset: {dataset_name}")
+    cfg = setup_wandb(cfg)
+    optimizer = get_optimiser(cfg, gnn_model, edge_classifier_model)
+
+    criterion = get_mse_loss(cfg)
+    logger.info("Training started, for {} epochs".format(cfg.train.n_epochs))
+
+    start_time = time.time()
+    accuracy = 0
+    loss = 0
+    epoch = 0
+    eval_loss = 0
+    eval_accuracy = 0
+    
+    train_dataset, val_dataset = train_test_split(datamodule.graphs.data, test_size=0.05, random_state=42)
+    val_batches = val_dataset
+    
+    for epoch in tqdm.tqdm(range(1, cfg.train.n_epochs + 1), desc=f'Training'):
+        total_loss = 0
+        total_correct = 0
+        total_samples = 0
+
+        # iid shuffle of the dataset
+        # random.shuffle(dataset)
+        batches = [train_dataset[i : i + cfg.dataset.batch_size] for i in range(0, len(train_dataset), cfg.dataset.batch_size)]
+        
+        for batch in batches:
+            (gnn_model, 
+             edge_classifier_model, 
+             loss, 
+             preds, 
+             edge_labels_batch) = process_regressor(batch, gnn_model, edge_classifier_model, device, optimizer, criterion)
+            total_loss += loss
+
+            total_samples += edge_labels_batch.size(0)  
+            
+        avg_loss = total_loss / len(batches)
+
+        
+        if epoch % cfg.general.check_val_every_n_epochs == 0:
+            _, _, loss, preds, edge_labels_batch = eval_process_regressor(val_batches, gnn_model, edge_classifier_model, device, optimizer, criterion)
+            preds_cpu = preds.cpu().numpy()
+            labels_cpu = edge_labels_batch.cpu().numpy()
+            print('Prediction Example: ', preds_cpu[:10])
+            print('Actual label example: ', labels_cpu[:10])
+            pearson_corr, pearson_pvalue = stats.pearsonr(preds_cpu, labels_cpu)
+            spearman_tau, spearman_pvalue = stats.spearmanr(preds_cpu, labels_cpu)
+            mae = mean_absolute_error(labels_cpu, preds_cpu)
+            rmse = mean_squared_error(labels_cpu, preds_cpu)
+            r2 = r2_score(labels_cpu, preds_cpu)
+            logger.info(f"Evaluation | Loss: {loss:.4f} | Pearson: {pearson_corr:.4f} | Spearman: {spearman_tau:.4f}")
+            torch.save({
+                'epoch': epoch,
+                'model_state_dict': gnn_model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'loss': avg_loss
+                }, "{}/{}_{}.pt".format(BASE_PATH, cfg.gnn_model.name, epoch))
+            torch.save({
+                'epoch': epoch,
+                'model_state_dict': edge_classifier_model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'loss': avg_loss
+                }, "{}/{}_{}.pt".format(BASE_PATH, cfg.edge_classifier_model.name, epoch))
+
+            wandb.log({
+            'val/loss': loss,
+            'val/pearson': pearson_corr,
+            'val/kendal': spearman_tau,
+            'val/r2': r2,
+            'val/mae': mae,
+            'val/rmse': rmse
+            })
+            
+        # logger.info(f"Epoch {epoch:02d}/{cfg.train.n_epochs} | Loss: {avg_loss:.4f} | Accuracy: {accuracy:.4f}")
+        wandb.log({
+            'train/epoch': epoch,
+            'train/loss': avg_loss
+
+        })
+    wandb.finish()

@@ -1,0 +1,22 @@
+name: 'PubMed'
+directed: True
+edge_count: 88648
+batch_size: 16
+# graphs_gen_count: 10  # comment out to generate 1 by default 
+sampling_threads: 16
+sampling_method: 'ego' # ego, random_walk, uniform, mix
+embedding_dim: 500
+edge_attribute_classes: 6
+# SaGess params 
+per_node_samples_rw:       40   # no of subgraphs sampled per node for random walk sampling
+per_node_samples_unif:  10000   # no of subgraphs sampled per node for uniform sampling
+per_node_samples_ego:      5   # no of subgraphs sampled per node for ego sampling
+subgraph_size:             20   # size of subgraph sampled for each node 
+ego_sample_radius:         2 
+mask_number:               0
+min_number_edges:          10
+# Parameters for removing nodes for inference
+remove_inference_nodes:    true   # Whether to remove nodes for inference
+num_inference_nodes:       100    # Number o
+original_node_attribute: True
+edge_attribute_mode: 'classifier' # classifier | regression

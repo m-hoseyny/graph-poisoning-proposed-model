@@ -1,13 +1,16 @@
 import hydra
 from omegaconf import DictConfig
-from train import train
+from train import train, train_regressor
 from test import test
 
 @hydra.main(version_base='1.1', config_path="../configs", config_name="config")
 def main(cfg : DictConfig) -> None:
     print(cfg)
     if cfg.general.test_only is False:
-        train(cfg)
+        if cfg.general.edge_model == 'classifier':
+            train(cfg)
+        else:
+            train_regressor(cfg)
     else:
         test(cfg)
 

@@ -180,6 +180,7 @@ class CoraDataset(Dataset):
         self.dataset_samples_wnmaps = dataset_samples_wnmaps
         undirected_transformer = ToUndirected()
         skiped = 0
+        print(f'Creating attributes in {self.cfg.dataset.edge_attribute_mode} mode')
         for i in tqdm(range(n_samples), desc='Creating attributes'):
             # edge_attr = torch.tensor(
             #     [[0 for k in range(dataset_samples_wnmaps[i][1].size()[1])],
@@ -236,8 +237,10 @@ class CoraDataset(Dataset):
             edge_att.append(local_edge_att)
             node_mapper[(node_1, node_2)] = (node_1_id, node_2_id)
             edge_pairs.append((node_1, node_2))  # keep directed for reconstruction
-            
-
+        
+        if self.cfg.dataset.edge_attribute_mode == 'regression':
+            edge_att = torch.tensor(edge_att, dtype=torch.float)
+            return edge_att
         # edge_att = torch.tensor(edge_att)
         unique_edges = dict(zip(edge_pairs, edge_att))
 
