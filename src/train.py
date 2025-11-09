@@ -13,7 +13,7 @@ import os
 import wandb
 from datetime import datetime
 import omegaconf
-from datasets.cora_dataset import CoraDataModule
+from datasets.load_datasets import CoraDataModule
 import tqdm
 from utils import get_optimiser, get_cross_entropy_loss, setup_wandb, get_mse_loss
 from model.process import process, eval_process, process_regressor, eval_process_regressor

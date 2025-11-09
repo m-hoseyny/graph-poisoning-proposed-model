@@ -10,7 +10,7 @@ torch.manual_seed(120)
 from torch.utils.data import random_split, Dataset
 from torch_geometric.data import Data
 from torch_geometric.utils import subgraph, to_undirected, k_hop_subgraph
-from torch_geometric.datasets import EmailEUCore, Planetoid, AttributedGraphDataset, SNAPDataset, WikipediaNetwork
+from torch_geometric.datasets import Amazon, Planetoid, CoraFull, WikipediaNetwork
 from datasets.abstract_dataset import AbstractDataModule, AbstractDatasetInfos
 import torch.nn.functional as F
 import torch_geometric.transforms as T
@@ -39,38 +39,19 @@ class CoraDataset(Dataset):
         self.removed_samples: List[Data] = []
         self.test_dataset: List[Data] = []
         self.test_dataset_original_edges = []
-
+        self.victim = cfg.general.victim.upper()
         self.attribute_task = self.cfg.general.attribute_task
         
         # Use absolute path based on project root
         project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
         print(f'-------\ntask {self.attribute_task}\n-------')
+        print(f'-------\nVictim {self.victim}\n--------')
         # dataset_path = os.path.join(project_root, 'datasets', 'directed_cora_attributes.pt')
         if self.attribute_task == 'class':
-            dataset_path = os.path.join(project_root, 'datasets', f'new_EPAGCL_{self.data_file}_{self.cfg.gnn_model.name}_class_performance.pkl')
+            dataset_path = os.path.join(project_root, 'datasets', f'new_{self.victim}_{self.data_file}_{self.cfg.gnn_model.name}_class_performance.pkl')
         elif self.attribute_task == 'edge':
-            dataset_path = os.path.join(project_root, 'datasets', f'EPAGCL_Full_{self.data_file}_{self.cfg.gnn_model.name}_edge_performance.pkl')
+            dataset_path = os.path.join(project_root, 'datasets', f'{self.victim}_Full_{self.data_file}_{self.cfg.gnn_model.name}_edge_performance.pkl')
         print('Edge performaces: ', dataset_path)
-        # if cfg.gnn_model.name == 'gcn' and self.data_file == 'Cora':
-        #     dataset_path = os.path.join(project_root, 'datasets', 'EPAGCL_Full_Cora_gcn_edge_performance.pkl')
-        # # elif cfg.gnn_model.name == 'sage' and self.data_file == 'Cora':
-        # #     dataset_path = os.path.join(project_root, 'datasets', 'Cora_sage_edge_performance.pkl')
-        # elif cfg.gnn_model.name == 'gat' and self.data_file == 'Cora':
-        #     dataset_path = os.path.join(project_root, 'datasets', 'EPAGCL_Full_Cora_gat_edge_performance.pkl')
-        
-        # if cfg.gnn_model.name == 'gcn' and self.data_file == 'CiteSeer':
-        #     dataset_path = os.path.join(project_root, 'datasets', 'EPAGCL_Full_CiteSeer_gcn_edge_performance.pkl')
-        # # elif cfg.gnn_model.name == 'sage' and self.data_file == 'CiteSeer':
-        # #     dataset_path = os.path.join(project_root, 'datasets', 'new_CiteSeer_sage_edge_performance.pkl')
-        # elif cfg.gnn_model.name == 'gat' and self.data_file == 'CiteSeer':
-        #     dataset_path = os.path.join(project_root, 'datasets', 'EPAGCL_Full_CiteSeer_gat_edge_performance.pkl')
-            
-        # if cfg.gnn_model.name == 'gcn' and self.data_file == 'Wikipedia':
-        #     dataset_path = os.path.join(project_root, 'datasets', 'new_Wikipedia_gcn_edge_performance.pkl')
-        # elif cfg.gnn_model.name == 'sage' and self.data_file == 'Wikipedia':
-        #     dataset_path = os.path.join(project_root, 'datasets', 'new_Wikipedia_sage_edge_performance.pkl')
-        # elif cfg.gnn_model.name == 'gat' and self.data_file == 'Wikipedia':
-        #     dataset_path = os.path.join(project_root, 'datasets', 'new_Wikipedia_gat_edge_performance.pkl')
         
         with open(dataset_path, 'rb') as f:
             self.edge_gcn_attributes = pickle.load(f)
@@ -180,7 +161,7 @@ class CoraDataset(Dataset):
         self.dataset_samples_wnmaps = dataset_samples_wnmaps
         undirected_transformer = ToUndirected()
         skiped = 0
-        print(f'Creating attributes in {self.cfg.dataset.edge_attribute_mode} mode')
+        print(f'Creating attributes in {self.cfg.general.edge_model} mode')
         for i in tqdm(range(n_samples), desc='Creating attributes'):
             # edge_attr = torch.tensor(
             #     [[0 for k in range(dataset_samples_wnmaps[i][1].size()[1])],
@@ -201,8 +182,8 @@ class CoraDataset(Dataset):
             Train_data.append(local_data)
         
         self.original_data = copy.deepcopy(Train_data)
-        with open('edge_attributes_dict.pkl', 'wb') as f:
-            pickle.dump(self.edge_att_dict, f)
+        # with open('edge_attributes_dict.pkl', 'wb') as f:
+        #     pickle.dump(self.edge_att_dict, f)
         # Remove samples connected to randomly selected nodes if requested
         if self.cfg.dataset.get('remove_inference_nodes', False):
             num_nodes_to_remove = self.cfg.dataset.get('num_inference_nodes', 100)
@@ -229,16 +210,17 @@ class CoraDataset(Dataset):
                 node_1_id = node_1
                 node_2_id = node_2
             # node_1_id, node_2_id = sorted([node_1_id, node_2_id])
-            if (node_1_id, node_2_id) in self.edge_gcn_attributes[node_1_id]:
+            if (node_1_id, node_2_id) in self.edge_gcn_attributes[center_node_id]:
+                local_edge_att = self.edge_gcn_attributes[center_node_id][(node_1_id, node_2_id)][-1][0]
+            elif (node_1_id, node_2_id) in self.edge_gcn_attributes[node_1_id]:
                 local_edge_att = self.edge_gcn_attributes[node_1_id][(node_1_id, node_2_id)][-1][0]
-            elif (node_2_id, node_1_id) in self.edge_gcn_attributes[node_1_id]:
-                local_edge_att = self.edge_gcn_attributes[node_1_id][(node_2_id, node_1_id)][-1][0]
+
             
             edge_att.append(local_edge_att)
             node_mapper[(node_1, node_2)] = (node_1_id, node_2_id)
             edge_pairs.append((node_1, node_2))  # keep directed for reconstruction
         
-        if self.cfg.dataset.edge_attribute_mode == 'regression':
+        if self.cfg.general.edge_model != 'classifier':
             edge_att = torch.tensor(edge_att, dtype=torch.float)
             return edge_att
         # edge_att = torch.tensor(edge_att)
@@ -351,8 +333,8 @@ class CoraDataset(Dataset):
         selected_nodes_set = set(selected_nodes.tolist()) 
         # self.removed_nodes = random.sample(all_nodes, min(num_nodes, len(all_nodes)))
         self.removed_nodes = list(selected_nodes_set)
-        with open('./removed_nodes.pkl', 'wb') as f:
-            pickle.dump(self.removed_nodes, f)
+        # with open('./removed_nodes.pkl', 'wb') as f:
+        #     pickle.dump(self.removed_nodes, f)
         print(f"Selected {len(self.removed_nodes)} nodes for inference")
         
         # Find and remove samples that contain any of the removed nodes

@@ -2,7 +2,7 @@ defaults:
     - gnn_model : gcn
     - edge_classifier_model : edge_mlp
     - train : train_default
-    - dataset : cora
+    - dataset : citeseer
     - general : general_default
 
 

@@ -14,8 +14,7 @@ per_node_samples_ego:      5   # no of subgraphs sampled per node for ego sampli
 subgraph_size:             20   # size of subgraph sampled for each node 
 ego_sample_radius:         2 
 mask_number:               0
-min_number_edges:          10
+min_number_edges:          100
 # Parameters for removing nodes for inference
 remove_inference_nodes:    true   # Whether to remove nodes for inference
-num_inference_nodes:       100    # Number o
 original_node_attribute: True
