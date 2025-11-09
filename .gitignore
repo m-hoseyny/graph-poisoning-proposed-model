@@ -160,8 +160,7 @@ src/cora/
 src/cora_raw/
 src/data
 *.pt
-*.pkl
 *.pyc
-*.md
 *.txt
 *ipynb
+datasets/Cora/
