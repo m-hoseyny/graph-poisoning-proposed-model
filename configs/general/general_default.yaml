@@ -15,4 +15,5 @@ samples_to_save: 10
 log_every_steps: 50
 number_of_tests: 10
 attribute_task: 'edge'
-edge_model: 'clssifier' # clssifier for classification | basic, dotproduct, advanced for regression
+edge_model: 'advanced' # classifier for classification | basic, dotproduct, advanced for regression
+victim: 'epagcl'

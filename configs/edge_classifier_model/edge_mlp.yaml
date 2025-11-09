@@ -1,2 +1,2 @@
 name: edge_mlp
-hidden_dim: 32
+hidden_dim: 64
