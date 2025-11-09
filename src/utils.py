@@ -49,7 +49,7 @@ def setup_wandb(cfg):
         sample_size = cfg.dataset.per_node_samples_unif
     elif cfg.dataset.sampling_method == 'mix':
         sample_size = cfg.dataset.per_node_samples_rw + cfg.dataset.per_node_samples_ego + cfg.dataset.per_node_samples_unif
-    dataset_name = cfg.dataset.name + '_' + cfg.dataset.sampling_method + str(sample_size) + '_EdAtt' + str(cfg.dataset.edge_attribute_classes) + '_{}'.format(cfg.dataset.edge_attribute_mode)
+    dataset_name = cfg.dataset.name + '_' + cfg.dataset.sampling_method + str(sample_size) + '_EdAtt' + str(cfg.dataset.edge_attribute_classes) + '_{}'.format(cfg.general.edge_model) + f'_{cfg.general.victim}'
     if cfg.general.test_only is True:
         dataset_name = 'test_' + dataset_name
     model_name = cfg.gnn_model.name + '_' + cfg.edge_classifier_model.name
