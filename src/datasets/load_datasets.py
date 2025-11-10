@@ -62,8 +62,12 @@ class CoraDataset(Dataset):
         if self.data_file == 'Wikipedia':
             graphs = WikipediaNetwork(base_path, name='chameleon', transform=T.NormalizeFeatures())
             directed_graph = False
-        else:
+        elif self.data_file in ['Cora', 'CiteSeer', 'PubMed']:
             graphs = Planetoid(base_path, self.data_file, transform=T.NormalizeFeatures())
+        elif self.data_file == 'CoraFull':
+            graphs = CoraFull(base_path, transform=T.NormalizeFeatures())
+        elif self.data_file == 'Amazon-Photo':
+            graphs = Amazon(base_path, 'photo', transform=T.NormalizeFeatures())
         # graphs.data = load_directed_cora()
         # graphs = DirectedCoraDataset('/mnt/data/mohammad-hosseini/DiGress/SaGess/data/DirectedCora')
             directed_graph = True 
@@ -397,6 +401,17 @@ class CoraDataset(Dataset):
 
 
     def ego_sample_threaded(self, per_node_samples=10, subgraph_size=20, radius=2, max_workers=2):
+        ego_path_node_list = '/root/nas/graph-poisoning-proposed-model/data/ego_{}_node_list.pkl'.format(self.data_file)
+        ego_path_sample_size = '/root/nas/graph-poisoning-proposed-model/data/ego_{}_sample_size.pkl'.format(self.data_file)
+
+        if os.path.exists(ego_path_node_list) and os.path.exists(ego_path_sample_size):
+            with open(ego_path_node_list, 'rb') as f:
+                self.dataset_node_lists = pickle.load(f)
+            with open(ego_path_sample_size, 'rb') as f:
+                self.samples_sizes = pickle.load(f)
+            print('Ego samples loaded from disk.')
+            return
+        print('Starting threaded ego sampling...')
         G = copy.copy(self.nx_graph)
 
         args_list = [(n, G, radius, per_node_samples, subgraph_size) for n in self.nx_graph.nodes()]
@@ -411,6 +426,13 @@ class CoraDataset(Dataset):
         
         self.dataset_node_lists.extend(all_samples)
         self.samples_sizes.extend(all_sizes)
+        try:
+            with open(ego_path_node_list, 'wb') as f:
+                pickle.dump(self.dataset_node_lists, f)
+            with open(ego_path_sample_size, 'wb') as f:
+                pickle.dump(self.samples_sizes, f)
+        except Exception as e:
+            print('Error saving ego samples to disk:', e)
 
 
     def __len__(self):
@@ -465,3 +487,20 @@ class CoraDatasetInfos(AbstractDatasetInfos):
         self.edge_types = self.datamodule.edge_counts()
         print('Edge types: ', self.edge_types)
         super().complete_infos(self.n_nodes, self.node_types)
+
+
+
+def load_datamodule_from_disk(cfg):
+    BASE_PATH = cfg.general.base_path
+    output_dir = os.path.join(BASE_PATH, 'models')
+    os.makedirs(output_dir, exist_ok=True)
+    
+    cora_module_path = os.path.join(output_dir, f'{cfg.dataset.name}_{cfg.general.victim}_{cfg.gnn_model.name}_module.pt')
+    if os.path.exists(cora_module_path):
+        print(f"Loading Cora DataModule from {cora_module_path}")
+        datamodule = torch.load(cora_module_path)
+    else:
+        datamodule = CoraDataModule(cfg)
+        print(f"Saving Cora DataModule to {cora_module_path}")
+        torch.save(datamodule, cora_module_path)
+    return datamodule
