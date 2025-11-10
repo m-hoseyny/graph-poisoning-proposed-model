@@ -164,3 +164,4 @@ src/data
 *.txt
 *ipynb
 datasets/Cora/
+*.sh

@@ -17,3 +17,5 @@ number_of_tests: 10
 attribute_task: 'edge'
 edge_model: 'advanced' # classifier for classification | basic, dotproduct, advanced for regression
 victim: 'epagcl'
+
+base_path: '/mnt/data/mohammad-hosseini/adverserial-attack/data/'
