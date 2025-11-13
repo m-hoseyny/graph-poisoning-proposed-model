@@ -41,6 +41,7 @@ class CoraDataset(Dataset):
         self.test_dataset_original_edges = []
         self.victim = cfg.general.victim.upper()
         self.attribute_task = self.cfg.general.attribute_task
+        self.nodes_removed_for_binary_classification = set()
         
         # Use absolute path based on project root
         project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -189,12 +190,14 @@ class CoraDataset(Dataset):
         # with open('edge_attributes_dict.pkl', 'wb') as f:
         #     pickle.dump(self.edge_att_dict, f)
         # Remove samples connected to randomly selected nodes if requested
-        if self.cfg.dataset.get('remove_inference_nodes', False):
-            num_nodes_to_remove = self.cfg.dataset.get('num_inference_nodes', 100)
-            self.remove_nodes_for_inference(Train_data, num_nodes_to_remove)
-            self.create_test_dataset()
         self.data = Train_data
-
+        if self.cfg.dataset.get('remove_inference_nodes', False):
+            self.remove_nodes_for_inference(Train_data)
+            self.create_test_dataset()
+            
+        if self.cfg.general.edge_model == 'binary_classifier':
+            self.remove_nodes_not_attacked(Train_data)
+        
     
     def get_edge_attributes(self, x, edge_index, test=False):
         edge_att = []
@@ -310,7 +313,7 @@ class CoraDataset(Dataset):
     #     node_list = list(random.choices(list(self.main_nx_graph.nodes()), k=mask_number))
     #     self.nx_graph.remove_nodes_from(node_list) 
         
-    def remove_nodes_for_inference(self, train_data, num_nodes=100):
+    def remove_nodes_for_inference(self, train_data):
         """
         Remove samples connected to randomly selected nodes.
         These nodes will be used during inference phase.
@@ -319,20 +322,19 @@ class CoraDataset(Dataset):
             train_data: List of Data objects representing the training samples
             num_nodes: Number of nodes to remove from training data
         """
-        print(f"Removing samples connected to {num_nodes} randomly selected nodes for inference")
         
         # Get all unique nodes from the dataset
-        all_nodes = set()
-        for sample in self.dataset_node_lists:
-            all_nodes.update(sample)
-        all_nodes = list(all_nodes)
+        # all_nodes = set()
+        # for sample in self.dataset_node_lists:
+        #     all_nodes.update(sample)
+        # all_nodes = list(all_nodes)
         
         # Randomly select nodes to remove
         random.seed(42)  # For reproducibility
         edge_index = self.graphs[0].edge_index
-        num_nodes = self.graphs[0].num_nodes
-        node_degrees = degree(edge_index[0], num_nodes=num_nodes).to('cpu')
+        node_degrees = degree(edge_index[0]).to('cpu')
         nodes_with_min_edges = (node_degrees >= self.cfg.dataset.min_number_edges).nonzero(as_tuple=True)[0]
+        print(f"Removing samples connected to {len(nodes_with_min_edges)} randomly selected nodes for inference")
         selected_nodes = nodes_with_min_edges
         selected_nodes_set = set(selected_nodes.tolist()) 
         # self.removed_nodes = random.sample(all_nodes, min(num_nodes, len(all_nodes)))
@@ -357,7 +359,36 @@ class CoraDataset(Dataset):
         removed_count = len(train_data) - len(filtered_data)
         print(f"Removed {removed_count} samples connected to selected nodes")
         
-        # Update the class attributes
+        # Update the data and remove the data would not be use in training
+        self.data = filtered_data
+        self.sample_size = len(filtered_data)
+        
+        return filtered_data
+    
+    def remove_nodes_not_attacked(self, train_data):
+        
+        for node, node_edges in self.edge_gcn_attributes.items():
+            if node_edges[(node, node)][-1][0] == 1:
+                self.nodes_removed_for_binary_classification.add(node)
+        
+        print(f"Selected {len(self.nodes_removed_for_binary_classification)} nodes for inference")
+        
+        # Find and remove samples that contain any of the removed nodes
+        indices_to_keep = []
+        indices_removed = []
+        for i, sample in enumerate(self.dataset_node_lists):
+            # Check if sample contains any of the removed nodes
+            if not any(node in self.nodes_removed_for_binary_classification for node in sample):
+                indices_to_keep.append(i)
+            else:
+                indices_removed.append(i)
+        
+        # Update the training data
+        filtered_data = [train_data[i] for i in indices_to_keep]
+        removed_count = len(train_data) - len(filtered_data)
+        print(f"Removed {removed_count} samples connected to selected nodes")
+        
+        # Update nodes that has been predicted true in class attack task
         self.data = filtered_data
         self.sample_size = len(filtered_data)
         
@@ -401,8 +432,8 @@ class CoraDataset(Dataset):
 
 
     def ego_sample_threaded(self, per_node_samples=10, subgraph_size=20, radius=2, max_workers=2):
-        ego_path_node_list = '/root/nas/graph-poisoning-proposed-model/data/ego_{}_node_list.pkl'.format(self.data_file)
-        ego_path_sample_size = '/root/nas/graph-poisoning-proposed-model/data/ego_{}_sample_size.pkl'.format(self.data_file)
+        ego_path_node_list = '{}/data/ego_{}_node_list.pkl'.format(self.cfg.general.base_path, self.data_file)
+        ego_path_sample_size = '{}/data/ego_{}_sample_size.pkl'.format(self.cfg.general.base_path, self.data_file)
 
         if os.path.exists(ego_path_node_list) and os.path.exists(ego_path_sample_size):
             with open(ego_path_node_list, 'rb') as f:

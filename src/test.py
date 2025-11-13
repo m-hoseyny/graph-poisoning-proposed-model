@@ -530,7 +530,7 @@ def test(cfg: DictConfig):
     datamodule = CoraDataModule(cfg)
     for i in range(cfg.general.number_of_tests):
         print('Trial {}'.format(i))
-        if cfg.general.edge_model == 'classifier':
+        if cfg.general.edge_model in ('classifier', 'binary_classifier'):
             test_once(cfg, test_number=i, datamodule=datamodule)
         else:
             test_once_regressor(cfg, test_number=i, datamodule=datamodule)

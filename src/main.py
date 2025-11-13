@@ -7,7 +7,7 @@ from test import test
 def main(cfg : DictConfig) -> None:
     print(cfg)
     if cfg.general.test_only is False:
-        if cfg.general.edge_model == 'classifier':
+        if cfg.general.edge_model in ('classifier', 'binary_classifier'):
             train(cfg)
         else:
             train_regressor(cfg)
