@@ -172,7 +172,10 @@ class CoraDataset(Dataset):
             #     [[0 for k in range(dataset_samples_wnmaps[i][1].size()[1])],
             #      [1 for n in range(dataset_samples_wnmaps[i][1].size()[1])]], 
             #     dtype = torch.long).transpose(0,1)
-        
+            # center_node_id = dataset_samples_wnmaps[i][0][0].item()
+            # if center_node_id in self.not_attacked_nodes:
+            #     skiped += 1
+            #     continue
             edge_attr = self.get_edge_attributes(dataset_samples_wnmaps[i][0], 
                                                     dataset_samples_wnmaps[i][1])
             if self.original_node_attribute:
@@ -185,7 +188,7 @@ class CoraDataset(Dataset):
                             edge_attr = edge_attr,
                             n_nodes=self.subgraph_size*torch.ones(1, dtype=torch.long), y = y)
             Train_data.append(local_data)
-        
+        print(f'Skipped nodes : {skiped}')
         self.original_data = copy.deepcopy(Train_data)
         # with open('edge_attributes_dict.pkl', 'wb') as f:
         #     pickle.dump(self.edge_att_dict, f)
@@ -195,8 +198,9 @@ class CoraDataset(Dataset):
             self.remove_nodes_for_inference(Train_data)
             self.create_test_dataset()
             
-        if self.cfg.general.edge_model == 'binary_classifier':
+        if self.cfg.general.edge_model == 'binary_classification':
             self.remove_nodes_not_attacked(Train_data)
+        print(f'Total training data: {len(self.data)}')
         
     
     def get_edge_attributes(self, x, edge_index, test=False):
@@ -227,6 +231,9 @@ class CoraDataset(Dataset):
             node_mapper[(node_1, node_2)] = (node_1_id, node_2_id)
             edge_pairs.append((node_1, node_2))  # keep directed for reconstruction
         
+        if self.cfg.general.edge_model == 'binary_classification':
+            edge_att = torch.tensor(edge_att - 2, dtype=torch.float) # make it binary. Becasue the values are 2 and 3
+            return edge_att
         if self.cfg.general.edge_model != 'classifier':
             edge_att = torch.tensor(edge_att, dtype=torch.float)
             return edge_att
@@ -364,14 +371,22 @@ class CoraDataset(Dataset):
         self.sample_size = len(filtered_data)
         
         return filtered_data
+
+    @property
+    def not_attacked_nodes(self):
+        if self.nodes_removed_for_binary_classification:
+            return self.nodes_removed_for_binary_classification
+        for node, node_edges in self.edge_gcn_attributes.items():
+            if node_edges[list(node_edges.keys())[0]][-1][0] == 1:
+                self.nodes_removed_for_binary_classification.add(node)
+        return self.nodes_removed_for_binary_classification
+        
     
     def remove_nodes_not_attacked(self, train_data):
         
-        for node, node_edges in self.edge_gcn_attributes.items():
-            if node_edges[(node, node)][-1][0] == 1:
-                self.nodes_removed_for_binary_classification.add(node)
+        not_attack_nodes = self.not_attacked_nodes
         
-        print(f"Selected {len(self.nodes_removed_for_binary_classification)} nodes for inference")
+        print(f"Selected {len(self.nodes_removed_for_binary_classification)} nodes that not attacked")
         
         # Find and remove samples that contain any of the removed nodes
         indices_to_keep = []
@@ -386,7 +401,7 @@ class CoraDataset(Dataset):
         # Update the training data
         filtered_data = [train_data[i] for i in indices_to_keep]
         removed_count = len(train_data) - len(filtered_data)
-        print(f"Removed {removed_count} samples connected to selected nodes")
+        print(f"Removed {removed_count} samples connected to not attacked nodes")
         
         # Update nodes that has been predicted true in class attack task
         self.data = filtered_data
